@@ -1,0 +1,28 @@
+# Glass Tiles: a hexagon holds a smaller, turned copy of the whole picture. The copy feeds
+# back, so hexagons appear inside hexagons. The bass swells the tile.
+name = Glass Tiles
+speed = 0.8
+persistence = 0.975
+
+zoom = 0.998
+zoom.bass = 0.006
+
+shape1 = textured
+shape1.sides = 6
+shape1.size = 0.36
+shape1.size.bass = 0.04
+shape1.zoom = 0.6
+shape1.spin = 0.15
+shape1.twist = 0.35
+shape1.opacity = 0.65
+
+shape2 = outline
+shape2.sides = 6
+shape2.size = 0.36
+shape2.size.bass = 0.04
+shape2.spin = 0.15
+shape2.color = 0.85
+shape2.light = 0.35
+
+wave1 = ring
+wave1.size = 0.08

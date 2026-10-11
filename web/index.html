@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sonograph 99</title>
+<meta name="description" content="A late-90s style music visualizer. The desktop renderer, compiled to WebAssembly.">
+<style>
+  :root {
+    --chassis: #2b303c;
+    --bevel-hi: #5b6479;
+    --bevel-lo: #12151c;
+    --label: #7a8398;
+    --gold: #e6c67e;
+    --screen: #040706;
+    --ink: #3df26a;
+    --font: "Cascadia Mono", Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--chassis);
+    color: var(--label);
+    font: 12px/1.3 var(--font);
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+  }
+  header, footer {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 4px 8px;
+    border-top: 1px solid var(--bevel-hi);
+    border-bottom: 1px solid var(--bevel-lo);
+  }
+  .lcd {
+    background: var(--screen);
+    color: var(--ink);
+    border: 1px solid;
+    border-color: var(--bevel-lo) var(--bevel-hi) var(--bevel-hi) var(--bevel-lo);
+    padding: 2px 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #brand { color: var(--gold); }
+  #track { flex: 1; min-width: 0; }
+  main { position: relative; min-height: 0; background: var(--screen); }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    touch-action: none;
+  }
+  canvas.grab { cursor: grab; }
+  canvas.grab:active { cursor: grabbing; }
+  footer { flex-wrap: wrap; row-gap: 4px; }
+  .group { display: flex; flex-wrap: wrap; gap: 3px; }
+  .sep { width: 1px; align-self: stretch; background: var(--bevel-lo); border-right: 1px solid var(--bevel-hi); margin: 0 3px; }
+  button, select {
+    font: inherit;
+    color: var(--ink);
+    background: var(--bevel-lo);
+    border: 1px solid;
+    border-color: var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi);
+    padding: 3px 7px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+  }
+  button:hover { background: #1b1f29; }
+  button:active, button[aria-pressed="true"] {
+    border-color: var(--bevel-lo) var(--bevel-hi) var(--bevel-hi) var(--bevel-lo);
+    background: var(--screen);
+  }
+  button[aria-pressed="true"] { color: var(--gold); }
+  button:focus-visible, select:focus-visible { outline: 1px solid var(--gold); outline-offset: 1px; }
+  .rate-control { display: flex; align-items: center; gap: 5px; color: var(--gold); }
+  button .k { color: var(--label); margin-right: 4px; }
+  .panel {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(440px, calc(100% - 32px));
+    background: rgba(43, 48, 60, 0.94);
+    border: 1px solid;
+    border-color: var(--bevel-hi) var(--bevel-lo) var(--bevel-lo) var(--bevel-hi);
+    padding: 16px;
+    color: #c9cfdc;
+  }
+  .panel h1 { margin: 0 0 8px; font-size: 14px; color: var(--gold); letter-spacing: 0.1em; text-transform: uppercase; }
+  .panel p { margin: 0 0 12px; }
+  .panel .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .panel code { color: var(--ink); background: var(--screen); padding: 0 4px; }
+  .panel pre { background: var(--screen); color: var(--ink); padding: 8px; overflow-x: auto; margin: 0 0 12px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 640px) {
+    #brand { display: none; }
+    footer .k { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="lcd" id="brand">Sonograph 99</div>
+  <div class="lcd" id="track">Silent preview: test signal</div>
+  <div class="lcd" id="readout">Loading</div>
+</header>
+<main>
+  <canvas id="screen" aria-label="Visualizer picture"></canvas>
+  <div class="panel" id="intro">
+    <h1>Sonograph 99</h1>
+    <p>The same renderer as the desktop app, running in this page. The picture behind this box
+      follows the built-in test signal with the sound off.</p>
+    <div class="row">
+      <button type="button" id="introDemo">Play demo loop</button>
+      <button type="button" id="introOpen">Open audio file</button>
+    </div>
+  </div>
+  <div class="panel" id="failure" hidden>
+    <h1>The renderer did not load</h1>
+    <p id="failureWhy"></p>
+    <p>Build it, then serve the project folder and open <code>/web/</code>:</p>
+    <pre>rustup target add wasm32-unknown-unknown
+cargo build -p sonograph-web --release --target wasm32-unknown-unknown
+python -m http.server 8000</pre>
+    <p>Then open <code>http://localhost:8000/web/</code>.</p>
+  </div>
+</main>
+<footer>
+  <div class="group" id="modes"></div>
+  <div class="sep"></div>
+  <div class="group">
+    <label class="rate-control" for="rate">Rate
+      <select id="rate" title="Pattern motion, transitions, and auto switching speed (Down / Up)">
+        <option value="0">0.25Ã—</option><option value="1">0.5Ã—</option>
+        <option value="2" selected>1Ã—</option><option value="3">1.5Ã—</option><option value="4">2Ã—</option>
+      </select>
+    </label>
+    <button type="button" id="auto" aria-pressed="false" title="Change visual on a beat, about every 15 seconds (A)"><span class="k">A</span>Auto</button>
+    <button type="button" id="recipe" title="Next recipe in Tunnel and Orbs (R)"><span class="k">R</span>Recipe</button>
+    <button type="button" id="skin" title="Next skin (S)"><span class="k">S</span>Skin</button>
+    <button type="button" id="shuffle" title="New variation (N)"><span class="k">N</span>Shuffle</button>
+    <button type="button" id="reset" title="Original variation (Backspace)"><span class="k">&#9003;</span>Reset</button>
+  </div>
+  <div class="sep"></div>
+  <div class="group">
+    <button type="button" id="demo" title="Play the demo loop (D)"><span class="k">D</span>Demo</button>
+    <button type="button" id="open" title="Open an audio file (O)"><span class="k">O</span>Open</button>
+    <button type="button" id="pause" title="Pause or resume (Space)" disabled>Pause</button>
+    <button type="button" id="full" title="Full screen (F)"><span class="k">F</span>Full</button>
+  </div>
+  <input type="file" id="file" accept="audio/*" hidden>
+</footer>
+<script>
+"use strict";
+const NAMES = ["Bars", "Scope", "Sonogram", "Halo", "Vector", "Tunnel", "Orbs", "Kaleidoscope", "Wireframe", "Mandala", "Gravity Waves", "Synthwave"];
+// Keys 1 to 9 pick the first nine visuals, 0 the tenth, G the eleventh, and W the twelfth.
+const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "G", "W"];
+const INK = { Classic: "#3df26a", Amber: "#ffae35", Ice: "#5fd6ff", Orchid: "#ff6fc8",
+  Aurora: "#20bdff", Sunset: "#fcb045", Lagoon: "#26d0ce", Candy: "#c471ed", Ember: "#f5af19", Citrine: "#f4d03f", Dracula: "#ff79c6", Mocha: "#cba6f7", Ocean: "#2d9ee0", Neon: "#00f5a0" };
+const SKINS = Object.keys(INK);
+const BACKGROUND = { Aurora: "#18234b", Sunset: "#482039", Lagoon: "#124449", Candy: "#3d254d", Ember: "#461c24", Citrine: "#303b19", Dracula: "#282a36", Mocha: "#1e1e2e", Ocean: "#091e3a", Neon: "#12343b" };
+// One canvas pixel covers this many screen pixels, as with the desktop app's default.
+const PIXEL = 2;
+
+const $ = (id) => document.getElementById(id);
+const canvas = $("screen");
+const ctx = canvas.getContext("2d");
+let wasm, image;
+
+// Audio: a source feeds the speakers and, through a splitter, one analyser per channel.
+let ac, gain, splitter, analysers, source, demoBuffer;
+let playing = false, paused = false, mono = false, heard = false, trackName = "";
+
+async function load() {
+  const urls = ["sonograph99.wasm", "../target/wasm32-unknown-unknown/release/sonograph_web.wasm"];
+  let why = "No sonograph99.wasm was found next to this page or in the build folder.";
+  if (location.protocol === "file:") {
+    why = "Browsers do not load WebAssembly from a file: address. Serve the folder instead.";
+  }
+  for (const url of urls) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) continue;
+      const { instance } = await WebAssembly.instantiate(await response.arrayBuffer(), {});
+      return instance.exports;
+    } catch (e) {
+      why = String(e.message || e);
+    }
+  }
+  $("intro").hidden = true;
+  $("failure").hidden = false;
+  $("failureWhy").textContent = why;
+  $("readout").textContent = "Not loaded";
+  return null;
+}
+
+function ensureAudio() {
+  if (ac) return;
+  ac = new AudioContext();
+  gain = ac.createGain();
+  gain.connect(ac.destination);
+  splitter = ac.createChannelSplitter(2);
+  analysers = [0, 1].map((ch) => {
+    const a = ac.createAnalyser();
+    a.fftSize = wasm.buffer_len();
+    splitter.connect(a, ch);
+    return a;
+  });
+}
+
+function play(buffer, loop, name) {
+  ensureAudio();
+  if (source) {
+    source.onended = null;
+    source.stop();
+  }
+  source = ac.createBufferSource();
+  source.buffer = buffer;
+  source.loop = loop;
+  source.connect(gain);
+  source.connect(splitter);
+  source.onended = () => { playing = false; updateButtons(); };
+  mono = buffer.numberOfChannels === 1;
+  source.start();
+  ac.resume();
+  playing = true;
+  paused = false;
+  heard = true;
+  trackName = name;
+  $("intro").hidden = true;
+  updateButtons();
+}
+
+function playDemo() {
+  ensureAudio();
+  if (!demoBuffer) {
+    const rate = ac.sampleRate;
+    const ptr = wasm.demo(rate);
+    const n = wasm.demo_len();
+    const samples = new Float32Array(wasm.memory.buffer, ptr, n * 2);
+    demoBuffer = ac.createBuffer(2, n, rate);
+    demoBuffer.copyToChannel(samples.subarray(0, n), 0);
+    demoBuffer.copyToChannel(samples.subarray(n), 1);
+  }
+  play(demoBuffer, true, "Demo loop - Am F C G at 112 BPM");
+}
+
+async function openFile(file) {
+  if (!file) return;
+  ensureAudio();
+  $("track").textContent = "Decoding " + file.name;
+  try {
+    const buffer = await ac.decodeAudioData(await file.arrayBuffer());
+    play(buffer, false, file.name);
+  } catch (e) {
+    $("track").textContent = "Could not play " + file.name + ": " + (e.message || e);
+  }
+}
+
+function togglePause() {
+  if (!ac || !playing) return;
+  paused = !paused;
+  paused ? ac.suspend() : ac.resume();
+  updateButtons();
+}
+
+function updateButtons() {
+  $("pause").disabled = !playing;
+  $("pause").textContent = paused ? "Resume" : "Pause";
+}
+
+let lastInfo = "";
+function updateStatus() {
+  const n = wasm.info();
+  const text = new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, wasm.info_ptr(), n));
+  if (text === lastInfo) return;
+  lastInfo = text;
+  const [name, recipe, auto, skin, seed, interactive] = text.split("|");
+  const parts = [name];
+  if (recipe) parts.push(recipe);
+  if (interactive === "1") parts.push("Seed " + seed);
+  if (auto === "1") parts.unshift("Auto");
+  $("readout").textContent = parts.join("  ");
+  $("auto").setAttribute("aria-pressed", auto === "1");
+  document.documentElement.style.setProperty("--ink", INK[skin] || INK.Classic);
+  document.documentElement.style.setProperty("--screen", BACKGROUND[skin] || "#040706");
+  $("skin").title = "Next skin (S) — " + skin;
+  canvas.classList.toggle("grab", interactive === "1");
+  document.querySelectorAll("#modes button").forEach((b) => {
+    b.setAttribute("aria-pressed", b.dataset.name === name);
+  });
+}
+
+let width = 0, height = 0;
+function fit() {
+  const w = Math.max(16, Math.min(4096, Math.round(canvas.clientWidth / PIXEL)));
+  const h = Math.max(16, Math.min(4096, Math.round(canvas.clientHeight / PIXEL)));
+  if (w !== width || h !== height) {
+    width = canvas.width = w;
+    height = canvas.height = h;
+    image = ctx.createImageData(w, h);
+  }
+}
+
+let last = performance.now();
+function tick(now) {
+  $("rate").value = String(wasm.rate_index());
+  const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+  last = now;
+  fit();
+  const n = wasm.buffer_len();
+  const left = new Float32Array(wasm.memory.buffer, wasm.left_buffer(), n);
+  const right = new Float32Array(wasm.memory.buffer, wasm.right_buffer(), n);
+  let rate = 48000;
+  if (playing && !paused) {
+    analysers[0].getFloatTimeDomainData(left);
+    if (mono) right.set(left); else analysers[1].getFloatTimeDomainData(right);
+    rate = ac.sampleRate;
+  } else if (!heard) {
+    wasm.preview(dt);
+  } else {
+    left.fill(0);
+    right.fill(0);
+  }
+  // Drawing may grow the memory, so the pixel view is made afterwards.
+  const ptr = wasm.frame(width, height, rate, dt);
+  image.data.set(new Uint8ClampedArray(wasm.memory.buffer, ptr, width * height * 4));
+  ctx.putImageData(image, 0, 0);
+  updateStatus();
+  $("track").textContent = !heard ? "Silent preview: test signal"
+    : (paused ? "Paused - " : playing ? "" : "Ended - ") + trackName;
+  requestAnimationFrame(tick);
+}
+
+function pointerAt(e, down) {
+  const r = canvas.getBoundingClientRect();
+  wasm.pointer((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, down ? 1 : 0);
+}
+
+function setup() {
+  NAMES.forEach((name, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.name = name.toUpperCase();
+    b.innerHTML = `<span class="k">${KEYS[i]}</span>${name}`;
+    b.addEventListener("click", () => wasm.set_mode(i));
+    $("modes").appendChild(b);
+  });
+  $("auto").addEventListener("click", () => wasm.toggle_auto());
+  $("rate").addEventListener("change", (e) => wasm.set_rate(Number(e.target.value)));
+  $("recipe").addEventListener("click", () => wasm.next_recipe());
+  $("skin").addEventListener("click", () => wasm.next_skin());
+  $("shuffle").addEventListener("click", () => wasm.reset_visual(1));
+  $("reset").addEventListener("click", () => wasm.reset_visual(0));
+  $("demo").addEventListener("click", playDemo);
+  $("introDemo").addEventListener("click", playDemo);
+  $("open").addEventListener("click", () => $("file").click());
+  $("introOpen").addEventListener("click", () => $("file").click());
+  $("file").addEventListener("change", (e) => openFile(e.target.files[0]));
+  $("pause").addEventListener("click", togglePause);
+  $("full").addEventListener("click", () => {
+    document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  });
+
+  let dragging = false;
+  canvas.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    canvas.setPointerCapture(e.pointerId);
+    pointerAt(e, true);
+  });
+  canvas.addEventListener("pointermove", (e) => { if (dragging) pointerAt(e, true); });
+  const release = () => { dragging = false; wasm.pointer(0, 0, 0); };
+  canvas.addEventListener("pointerup", release);
+  canvas.addEventListener("pointercancel", release);
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    wasm.wheel(-Math.sign(e.deltaY));
+  }, { passive: false });
+
+  document.addEventListener("dragover", (e) => e.preventDefault());
+  document.addEventListener("drop", (e) => {
+    e.preventDefault();
+    openFile(e.dataTransfer.files[0]);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest("select, input, textarea")) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key;
+    if (KEYS.includes(k.toUpperCase())) wasm.set_mode(KEYS.indexOf(k.toUpperCase()));
+    else if (k === "ArrowRight") wasm.step_mode(1);
+    else if (k === "ArrowLeft") wasm.step_mode(-1);
+    else if (k === "ArrowDown") wasm.step_rate(-1);
+    else if (k === "ArrowUp") wasm.step_rate(1);
+    else if (k === "a" || k === "A") wasm.toggle_auto();
+    else if (k === "r" || k === "R") wasm.next_recipe();
+    else if (k === "s" || k === "S") wasm.next_skin();
+    else if (k === "n" || k === "N") wasm.reset_visual(1);
+    else if (k === "Backspace") wasm.reset_visual(0);
+    else if (k === "d" || k === "D") playDemo();
+    else if (k === "o" || k === "O") $("file").click();
+    else if (k === "f" || k === "F") $("full").click();
+    else if (k === " " && playing) togglePause();
+    else return;
+    e.preventDefault();
+  });
+}
+
+(async () => {
+  wasm = await load();
+  if (!wasm) return;
+  // ?mode=1..12 and ?skin=<name> choose the start (see docs/skin-sources.md).
+  const q = new URLSearchParams(location.search);
+  const mode = Math.min(NAMES.length, Math.max(1, Number(q.get("mode")) || 6)) - 1;
+  const skin = Math.max(0, SKINS.findIndex((s) => s.toLowerCase() === (q.get("skin") || "").toLowerCase()));
+  wasm.start(mode, skin, (Math.random() * 2 ** 32) >>> 0);
+  setup();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

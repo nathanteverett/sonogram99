@@ -1,0 +1,16 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+
+# Local agent settings
+.claude/settings.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini

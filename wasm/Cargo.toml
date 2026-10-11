@@ -1,0 +1,14 @@
+[package]
+name = "sonograph-web"
+version = "0.1.0"
+edition = "2021"
+description = "Sonograph 99 in a browser: the core renderer compiled to WebAssembly."
+license = "MIT"
+publish = false
+
+[lib]
+# cdylib is the .wasm file for the page; rlib lets the tests run on the desktop.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+sonograph-core = { path = "../core" }

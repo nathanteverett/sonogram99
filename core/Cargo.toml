@@ -1,0 +1,10 @@
+[package]
+name = "sonograph-core"
+version = "0.1.0"
+edition = "2021"
+description = "The Sonograph 99 renderer: audio analysis, visual modes, presets and transitions. No window or audio device code."
+license = "MIT"
+publish = false
+
+[dependencies]
+rustfft = "6.4.1"

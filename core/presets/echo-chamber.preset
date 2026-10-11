@@ -1,0 +1,20 @@
+# Echo Chamber: a mirrored copy of the picture folds over itself, and a swirl at the
+# center twists the trails. Beats push the echo harder.
+name = Echo Chamber
+speed = 0.9
+warp = 0.8
+persistence = 0.97
+
+zoom = 1.004
+zoom.bass = 0.01
+swirl = 0.004
+swirl.mids_slow = 0.012
+
+echo = 0.4
+echo.beat = 0.3
+echo_zoom = 1.3
+echo_mirror = x
+
+wave1 = line
+wave1.spin = 0.15
+wave1.wobble.mids = 0.2

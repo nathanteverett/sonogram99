@@ -1,0 +1,18 @@
+# Solar Flare: each beat draws a glowing border, and the picture falls inward, so the
+# borders nest toward the center in time with the music. Solarizing turns the brightest
+# light dark again.
+name = Solar Flare
+speed = 1.1
+persistence = 0.97
+
+zoom = 0.986
+zoom.bass = -0.01
+rot = 0.003
+border = 0
+border.beat = 1.6
+border_size = 0.012
+border_color = 0.9
+
+solarize = 0.5
+
+wave1 = xy

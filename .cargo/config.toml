@@ -1,0 +1,3 @@
+[alias]
+# Builds the renderer for the browser page in web/index.html.
+web = "build -p sonograph-web --release --target wasm32-unknown-unknown"

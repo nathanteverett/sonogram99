@@ -1,0 +1,20 @@
+# Ripple Pool: each beat sends rings of zoom out from the center, over a spectrum that
+# floats below the middle. The center darkens so the rings stay clear.
+name = Ripple Pool
+speed = 0.9
+persistence = 0.975
+
+zoom = 1.002
+zoom.bass = 0.004
+zoom_edge = 0.006
+ripple = 0.08
+ripple.beat = 0.7
+center_dark = 0.5
+
+wave1 = spectrum
+wave1.y = 0.62
+wave1.amp = 0.28
+
+wave2 = ring
+wave2.size = 0.07
+wave2.light = 0.1
