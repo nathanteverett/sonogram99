@@ -32,6 +32,9 @@ impl Look {
 
 /// Applies the effects to `c`. `copy` is scratch space that the caller keeps between frames.
 pub fn apply(c: &mut Canvas, look: &Look, mirror: Mirror, copy: &mut Vec<u32>) {
+    if (look.echo > 1e-3 || look.tones()) && crate::acceleration::run(crate::acceleration::Operation::Post {
+        pixels: &mut c.px, w: c.w, h: c.h, look, mirror,
+    }) { return; }
     if look.echo > 1e-3 {
         echo(c, look.echo, look.echo_zoom, mirror, copy);
     }
@@ -48,6 +51,7 @@ pub fn apply(c: &mut Canvas, look: &Look, mirror: Mirror, copy: &mut Vec<u32>) {
             *p = pack([table[r as usize], table[g as usize], table[b as usize]]);
         }
     }
+    crate::acceleration::finish_software();
 }
 
 /// Blends `amount` of a copy of the picture, zoomed about the center and maybe flipped.

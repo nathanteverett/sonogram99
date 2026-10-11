@@ -32,6 +32,7 @@ Options:
 | `--mode <1-11>` | Start in a mode |
 | `--skin <name>` | One of the [14 color skins](#color-skins) |
 | `--pixel <1-4>` | Pixel size. Larger is chunkier and faster. Default 2 |
+| `--renderer <auto\|software>` | Override the saved rendering choice for this session |
 | `--auto` | Change mode on a beat, about every 15 seconds |
 | `--fullscreen` | Start in borderless fullscreen on Windows |
 | `--preset <name or file>` | Recipe for Tunnel and Orbs: a built-in name (see [Visual recipes](#visual-recipes)) or a recipe file |
@@ -41,6 +42,36 @@ Options:
 | `--render <wav> <folder>` | Draw a WAV file as numbered BMP frames in an empty folder, then exit |
 | `--fps <1-240>` | Frame rate for `--render`. Default 60 |
 | `--size <WxH>` | Picture size for `--render`. Default `1280x720` |
+
+## GPU acceleration
+
+The desktop app starts with **Automatic** rendering. It uses a compatible hardware GPU
+for expensive light-field warps, glow coloring, effects, and the procedural Orbs,
+Kaleidoscope, Mandala, and Gravity Waves pixel calculations. Automatic compares a few
+CPU and GPU passes for expensive workloads at each resolution, including transfer time,
+and uses the GPU when it has a clear speed advantage. Small images and cheap stand-alone
+coloring and sharp warp passes stay on the CPU to avoid GPU transfer overhead.
+Kaleidoscope and Mandala combine projection and coloring in one GPU pass.
+Audio analysis, geometry, UI, and final window display
+still run through the existing CPU path; GPU acceleration does not change the selected
+pixel size or visual quality. Performance depends on the visual, resolution, and hardware.
+
+Open **M Catalogue > Functions** and run **Rendering: Automatic** or
+**Rendering: Software**. The choice takes effect during the session and saves to
+`%APPDATA%\Sonograph99\rendering.conf` on Windows (the same configuration directory
+as hotkeys on other platforms). Selecting a rendering entry shows the GPU adapter or
+software fallback reason; the header also shows **GPU** or **CPU**. Software mode is
+available for troubleshooting driver problems. A failed GPU initialization or operation
+falls back to software while keeping the current visual and audio running.
+
+Use `--renderer software` to bypass GPU initialization, or `--renderer auto` to override
+a saved software preference. Command-line overrides do not change the saved setting.
+Snapshots and WAV renders use software by default for reproducibility; pass
+`--renderer auto` to accelerate an offline job. The browser build continues to use its
+software renderer. No additional background service or GPU vendor SDK is required.
+
+Hardware validation: `cargo test -p sonograph-gpu --release --test hardware -- --ignored --nocapture`.
+These explicit tests require a real GPU and compare the shaders with the software output.
 
 ## Color skins
 

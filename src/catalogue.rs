@@ -21,6 +21,7 @@ const SLOT_KEYS: [Key; SLOTS] = [Key::Key1, Key::Key2, Key::Key3, Key::Key4, Key
 pub enum Action {
     Visual(usize),
     Function(Key),
+    Rendering(crate::rendering::Preference),
 }
 
 pub struct Entry {
@@ -63,6 +64,8 @@ pub const ENTRIES: &[Entry] = &[
     Entry { id: "faster", name: "Faster patterns", description: "Raise motion and pattern rate, up to 2x.", action: Action::Function(Key::Up) },
     Entry { id: "pulse", name: "Toggle pulse", description: "Turn beat and attack accents on or off.", action: Action::Function(Key::T) },
     Entry { id: "miniaturize", name: "Miniaturize", description: "Floating Halo. Drag center; double/right-click to restore.", action: Action::Function(Key::F12) },
+    Entry { id: "renderer-auto", name: "Rendering: Automatic", description: "Use GPU acceleration when available. Saved automatically.", action: Action::Rendering(crate::rendering::Preference::Auto) },
+    Entry { id: "renderer-software", name: "Rendering: Software", description: "Use the CPU renderer. Saved automatically.", action: Action::Rendering(crate::rendering::Preference::Software) },
 ];
 
 /// The position of an entry in `ENTRIES`, from its saved id.
@@ -227,6 +230,7 @@ pub fn config_path() -> Option<PathBuf> {
 
 #[derive(Default)]
 pub struct Catalogue {
+    pub renderer: String,
     pub open: bool,
     pub selected: usize,
     pub bindings: Bindings,
@@ -287,7 +291,7 @@ impl Catalogue {
         }
         // A function has one shortcut after reassignment. Its old fixed letter must
         // not continue to execute it or overwrite the new shortcut through recursion.
-        if matches!(ENTRIES[self.selected].action, Action::Function(_)) {
+        if !matches!(ENTRIES[self.selected].action, Action::Visual(_)) {
             self.bindings.clear(self.selected);
         }
         self.bindings.set(key, Some(self.selected));
@@ -399,7 +403,9 @@ impl Catalogue {
             c.text_right(&keys, right, yy + 3, if selected { ink } else { LABEL_DIM });
         }
         let clip = (x, right);
-        let detail = if self.status.is_empty() { ENTRIES[self.selected].description } else { &self.status };
+        let detail = if !self.status.is_empty() { &self.status }
+            else if matches!(ENTRIES[self.selected].action, Action::Rendering(_)) && !self.renderer.is_empty() { &self.renderer }
+            else { ENTRIES[self.selected].description };
         c.text_clipped(detail, x, y + l.h - 40, ink, clip);
         c.text_clipped("Keys assign  Space run  Arrows select", x, y + l.h - 29, LABEL_DIM, clip);
         c.text("Enter:bind", x, y + l.h - 13, GOLD);
@@ -472,7 +478,7 @@ mod tests {
                     assert_eq!(mode, i, "{} is out of order", entry.id);
                     assert_eq!(entry.name.to_uppercase(), modes[mode].name());
                 }
-                Action::Function(_) => assert!(i >= VISUALS, "{} is among the visuals", entry.id),
+                Action::Function(_) | Action::Rendering(_) => assert!(i >= VISUALS, "{} is among the visuals", entry.id),
             }
         }
         let bindings = Bindings::default();
@@ -580,8 +586,12 @@ mod tests {
         assert_eq!(legacy.entry(Key::Key0), Some(id("mandala")), "Files from before Mandala get it on 0");
         assert_eq!(legacy.entry(Key::G), Some(id("gravity-waves")));
         for (entry, item) in ENTRIES.iter().enumerate().skip(VISUALS) {
-            let Action::Function(key) = item.action else { panic!("Expected function"); };
-            assert_eq!(legacy.entry(key), Some(entry));
+            if let Action::Function(key) = item.action {
+                assert_eq!(legacy.entry(key), Some(entry));
+            } else {
+                assert!(matches!(item.action, Action::Rendering(_)));
+                assert_eq!(legacy.labels(entry), "-", "Rendering settings have no default hotkey");
+            }
         }
     }
 }

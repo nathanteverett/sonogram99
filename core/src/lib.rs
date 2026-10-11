@@ -3,6 +3,7 @@
 //! offline renderer, and the WebAssembly build all draw through it.
 
 pub mod analysis;
+pub mod acceleration;
 pub mod canvas;
 pub mod feedback;
 pub mod fluid;

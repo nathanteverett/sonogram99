@@ -8,6 +8,7 @@ mod catalogue;
 mod fullscreen;
 mod media;
 mod miniaturize;
+mod rendering;
 
 use std::io::Write;
 use std::time::Instant;
@@ -52,6 +53,7 @@ Options:
   --skin <name>     classic, amber, ice, orchid, aurora, sunset, lagoon, candy,
                     ember, citrine, dracula, mocha, ocean, or neon
   --pixel <1-4>     Pixel size. Larger is chunkier and faster (default 2)
+  --renderer <auto|software>  Override the saved rendering choice for this session
   --auto            Change mode on a beat, about every 15 seconds
   --fullscreen      Start in borderless fullscreen (Windows)
   --preset <name|file> A recipe for modes 6/7: Liquid, Slow Drift, Electric, Echo Chamber,
@@ -79,6 +81,7 @@ Keys:
   current media app through Windows media controls)";
 
 struct Options {
+    renderer: Option<rendering::Preference>,
     source: Source,
     mode: usize,
     skin: usize,
@@ -98,7 +101,7 @@ struct Options {
 impl Default for Options {
     fn default() -> Self {
         Options { source: Source::Loopback, mode: 0, skin: 0, scale: 2, auto: false, fullscreen: false, snapshot: None, probe: false,
-            preset: Preset::default(), save_preset: None, render: None, fps: 60.0, size: (1280, 720) }
+            renderer: None, preset: Preset::default(), save_preset: None, render: None, fps: 60.0, size: (1280, 720) }
     }
 }
 
@@ -112,6 +115,7 @@ fn parse_args() -> Result<Options, String> {
             "--test" => o.source = Source::Test,
             "--auto" => o.auto = true,
             "--fullscreen" => o.fullscreen = true,
+            "--renderer" => o.renderer = Some(rendering::Preference::parse(&value("--renderer")?)?),
             "--mode" => {
                 let v = value("--mode")?;
                 o.mode = match v.parse::<usize>() {
@@ -163,6 +167,8 @@ fn parse_args() -> Result<Options, String> {
 }
 
 struct App {
+    rendering: rendering::Preference,
+    rendering_pending: bool,
     fullscreen: bool,
     miniaturized: bool,
     catalogue: Catalogue,
@@ -201,6 +207,8 @@ struct App {
 impl App {
     fn new(o: &Options, with_media: bool) -> Self {
         let mut app = App {
+            rendering: o.renderer.unwrap_or_default(),
+            rendering_pending: false,
             fullscreen: o.fullscreen,
             miniaturized: false,
             catalogue: Catalogue::default(),
@@ -420,6 +428,10 @@ impl App {
         match action {
             Action::Visual(mode) => self.set_mode(mode),
             Action::Function(key) => self.execute_function(key),
+            Action::Rendering(preference) => {
+                self.rendering = preference;
+                self.rendering_pending = true;
+            }
         }
     }
 
@@ -688,6 +700,7 @@ impl App {
         };
         let src = if self.using_test() { "TEST" } else { self.source.label() };
         let mut readouts = vec![
+            if sonograph_core::acceleration::status().adapter.is_some() { "GPU".into() } else { "CPU".into() },
             self.show.name().to_string(),
             src.to_string(),
             format!("PEAK {} DB", self.peak_text),
@@ -863,6 +876,18 @@ fn run(o: &Options) -> Result<(), String> {
     let clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
     app.show.reseed(clock);
     app.catalogue.load();
+    if o.renderer.is_none() {
+        if let Some(path) = rendering::config_path() {
+            match rendering::Preference::load(&path) {
+                Ok(preference) => app.rendering = preference,
+                Err(error) => app.toast(error),
+            }
+        }
+    }
+    rendering::apply(app.rendering);
+    let mut renderer_status = sonograph_core::acceleration::status();
+    app.catalogue.renderer = rendering::description();
+    if renderer_status.fallback.is_some() { app.toast(rendering::description()); }
     let mut title = String::new();
     let mut last = Instant::now();
     let mut mouse_down = false;
@@ -918,6 +943,25 @@ fn run(o: &Options) -> Result<(), String> {
             app.catalogue.navigate(if wheel > 0.0 { -1 } else { 1 });
         }
         app.frame(w, h, dt);
+        if app.rendering_pending {
+            app.rendering_pending = false;
+            rendering::apply(app.rendering);
+            let saved = rendering::config_path().ok_or_else(|| "Settings directory unavailable".to_string())
+                .and_then(|path| app.rendering.save(&path));
+            app.toast(match saved {
+                Ok(()) => rendering::description(),
+                Err(error) => format!("{}; session only: {error}", rendering::description()),
+            });
+        }
+        let current_renderer = sonograph_core::acceleration::status();
+        if current_renderer.adapter != renderer_status.adapter || current_renderer.fallback != renderer_status.fallback {
+            app.catalogue.renderer = rendering::description();
+            if current_renderer.fallback.is_some() {
+                eprintln!("{}", rendering::description());
+                app.toast(rendering::description());
+            }
+        }
+        renderer_status = current_renderer;
         window
             .update_with_buffer(&app.screen.px, w, h)
             .map_err(|e| format!("Could not draw the window: {e}"))?;
@@ -949,6 +993,11 @@ fn main() {
             Err(e) => { eprintln!("{e}"); std::process::exit(1); }
         }
         return;
+    }
+    // Offline jobs remain deterministic software by default. An explicit override can
+    // exercise the same GPU kernels without opening a window.
+    if (opts.render.is_some() || opts.snapshot.is_some()) && opts.renderer.is_some() {
+        rendering::apply(opts.renderer.unwrap());
     }
     let result = match &opts.snapshot {
         _ if opts.render.is_some() => {
@@ -1410,6 +1459,22 @@ mod tests {
         app.catalogue.selected = catalogue::index("miniaturize").unwrap();
         app.key(Key::Space);
         assert!(app.miniaturized && !app.catalogue.open);
+    }
+
+    #[test]
+    fn rendering_selection_preserves_visual_and_defers_device_work() {
+        let mut app = App::new(&test_options(7), false);
+        let controls = app.show.controls[7];
+        for preference in [rendering::Preference::Software, rendering::Preference::Auto] {
+            app.catalogue.selected = catalogue::ENTRIES.iter().position(|entry|
+                matches!(entry.action, Action::Rendering(p) if p == preference)).unwrap();
+            app.catalogue.open = true;
+            app.catalogue_hit(Hit::Run);
+            assert_eq!(app.rendering, preference);
+            assert!(app.rendering_pending && !app.catalogue.open);
+            assert_eq!(app.show.mode, 7);
+            assert_eq!(app.show.controls[7], controls);
+        }
     }
 
     fn test_options(mode: usize) -> Options {

@@ -406,25 +406,33 @@ impl Mode for GravityWaves {
         let haze = self.energy * 0.45 + self.flash * 3.0;
         let (haze_u, haze_r) = (0.12 + 0.5 * self.flash, 1.0 / (0.16 * unit).powi(2));
         self.body.fit(w, h);
-        self.body.paint(|x, y| {
-            let (mut px, mut py) = (x as f32, y as f32);
-            for &(hx, hy, e2) in &lenses {
-                let (dx, dy) = (x as f32 - hx, y as f32 - hy);
-                let k = e2 / (dx * dx + dy * dy + 1.0);
-                px -= dx * k;
-                py -= dy * k;
-            }
-            let (height, amp, d) = waves.at(px, py);
-            let near = (d * inner).min(1.0);
-            let crest = 0.5 + 0.5 * height;
-            let band = crest * crest * crest;
-            let e = amp * near * near * (3.0 - 2.0 * near) * (0.22 + 1.7 * band) / (1.0 + d * fade);
-            let (dx, dy) = (px - now.0, (py - now.1) * waves.stretch);
-            let glow = haze / (1.0 + (dx * dx + dy * dy) * haze_r);
-            let u = 0.18 + band * (0.32 + 0.55 * (d * far).min(1.0).sqrt());
-            let total = e + glow;
-            (total, if total > 1e-6 { (e * u + glow * haze_u) / total } else { 0.0 })
+        let rings: Vec<[f32; 5]> = self.table.iter().map(|r| [r.cos, r.sin, r.amp, r.x, r.y]).collect();
+        let accelerated = crate::acceleration::run(crate::acceleration::Operation::Gravity {
+            dst: self.body.pixels_mut(), w, h, rings: &rings, lenses: &lenses, now,
+            stretch: waves.stretch, moved: waves.moved, inner, fade, far, haze, haze_u, haze_r,
         });
+        if !accelerated {
+            self.body.paint(|x, y| {
+                let (mut px, mut py) = (x as f32, y as f32);
+                for &(hx, hy, e2) in &lenses {
+                    let (dx, dy) = (x as f32 - hx, y as f32 - hy);
+                    let k = e2 / (dx * dx + dy * dy + 1.0);
+                    px -= dx * k;
+                    py -= dy * k;
+                }
+                let (height, amp, d) = waves.at(px, py);
+                let near = (d * inner).min(1.0);
+                let crest = 0.5 + 0.5 * height;
+                let band = crest * crest * crest;
+                let e = amp * near * near * (3.0 - 2.0 * near) * (0.22 + 1.7 * band) / (1.0 + d * fade);
+                let (dx, dy) = (px - now.0, (py - now.1) * waves.stretch);
+                let glow = haze / (1.0 + (dx * dx + dy * dy) * haze_r);
+                let u = 0.18 + band * (0.32 + 0.55 * (d * far).min(1.0).sqrt());
+                let total = e + glow;
+                (total, if total > 1e-6 { (e * u + glow * haze_u) / total } else { 0.0 })
+            });
+            crate::acceleration::finish_software();
+        }
 
         // The trails drift outward more slowly than the waves, so the waves smear behind
         // their motion. Mids bend the smear. The trails never turn: a turn would bring dark

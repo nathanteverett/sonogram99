@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 
 use crate::canvas::{pack, Canvas};
 use crate::palette::Palette;
+use crate::acceleration::{self, Operation, Warp};
 
 /// One pixel: the light, then the light times the gradient position. Storing the product
 /// means every warp and smear averages the position by brightness.
@@ -176,6 +177,11 @@ impl Field {
         if w < 2 || h < 2 {
             return;
         }
+        if acceleration::run(Operation::Warp { src: &self.px, dst: &mut self.tmp, w, h,
+            warp: Warp::Flow { from, to, zoom, rot, keep, flow }, spread }) {
+            std::mem::swap(&mut self.px, &mut self.tmp);
+            return;
+        }
         let (sn, cs) = rot.sin_cos();
         let inv = 1.0 / zoom;
         let src = &self.px;
@@ -207,6 +213,7 @@ impl Field {
             }
         });
         std::mem::swap(&mut self.px, &mut self.tmp);
+        acceleration::finish_software();
     }
 
     /// Moves the light by a grid: each pixel takes its light from the place the grid gives
@@ -215,6 +222,11 @@ impl Field {
         let (w, h) = (self.w, self.h);
         let (cols, rows) = (grid.cols, grid.rows);
         if w < 2 || h < 2 || cols == 0 || rows == 0 || grid.pts.len() != (cols + 1) * (rows + 1) {
+            return;
+        }
+        if acceleration::run(Operation::Warp { src: &self.px, dst: &mut self.tmp, w, h,
+            warp: Warp::Grid(grid), spread }) {
+            std::mem::swap(&mut self.px, &mut self.tmp);
             return;
         }
         // Each column's cell and its place across that cell, the same on every row.
@@ -245,6 +257,7 @@ impl Field {
             }
         });
         std::mem::swap(&mut self.px, &mut self.tmp);
+        acceleration::finish_software();
     }
 
     /// Adds a soft round spot of light at gradient position `u`: `a` at the center, falling
@@ -492,6 +505,10 @@ impl Field {
         });
     }
 
+    /// Optional procedural kernels write exactly the same (energy, energy * hue) field.
+    pub(crate) fn pixels(&self) -> &[[f32; 2]] { &self.px }
+    pub(crate) fn pixels_mut(&mut self) -> &mut [[f32; 2]] { &mut self.px }
+
     pub fn add_scaled(&mut self, other: &Field, amount: f32) {
         assert_eq!((self.w, self.h), (other.w, other.h));
         for (p, q) in self.px.iter_mut().zip(&other.px) {
@@ -518,6 +535,9 @@ impl Field {
 
     /// Limit background brightness so a separately drawn foreground remains prominent.
     pub fn resolve_at(&self, c: &mut Canvas, pal: &Palette, brightness: f32) {
+        if (self.w, self.h) == (c.w, c.h) && acceleration::run(Operation::Resolve {
+            src: &self.px, dst: &mut c.px, w: self.w, h: self.h, palette: pal, brightness,
+        }) { return; }
         let bg = pal.skin.screen.map(|v| v as f32);
         let hot = pal.skin.peak.map(|v| v as f32);
         let screen = pack(pal.skin.screen);
@@ -545,6 +565,7 @@ impl Field {
                 }
             }
         });
+        acceleration::finish_software();
     }
 }
 

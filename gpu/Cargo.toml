@@ -1,0 +1,13 @@
+[package]
+name = "sonograph-gpu"
+version = "0.1.0"
+edition = "2021"
+description = "Native GPU acceleration for Sonograph 99's shared renderer."
+license = "MIT"
+publish = false
+
+[dependencies]
+sonograph-core = { path = "../core" }
+wgpu = "30.0.1"
+pollster = "0.4"
+bytemuck = "1.25"

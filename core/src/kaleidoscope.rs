@@ -248,6 +248,14 @@ struct Lens {
 }
 
 impl Lens {
+    fn gpu_params(&self, scale: f32) -> [f32; 16] {
+        let kind = match self.mirrors { Mirrors::Equilateral => 0.0, Mirrors::HalfEquilateral => 1.0,
+            Mirrors::RightIsosceles => 2.0, Mirrors::Square => 3.0 };
+        let mut p = [kind, self.cos, self.sin, self.inv, self.pan.0, self.pan.1, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        for (i, &(x, y)) in self.window.iter().enumerate() { p[8+i*2] = x*scale; p[9+i*2] = y*scale; }
+        p
+    }
     fn new(p: &Pattern, side: f32, twist: f32, turn: f32) -> Self {
         let tile = (side * p.size / p.mirrors.reach()).max(1e-3);
         let (sin, cos) = (p.angle + twist).sin_cos();
@@ -740,6 +748,14 @@ impl Mode for Kaleidoscope {
         let shift_x: Vec<_> = (0..h).map(|y| (y as f32 / side * 7.0 + scene.t * 0.9).sin() * wobble).collect();
         let shift_y: Vec<_> = (0..w).map(|x| (x as f32 / side * 6.0 - scene.t * 0.8).sin() * wobble).collect();
         let cell = &self.cell;
+        let cell_scale = cell.w as f32 / CELL as f32;
+        let accelerated = crate::acceleration::run(crate::acceleration::Operation::Kaleidoscope {
+            src: cell.pixels(), side: cell.w, dst: &mut c.px, palette: pal, w, h, center,
+            shift_x: &shift_x, shift_y: &shift_y, current: current.gpu_params(cell_scale),
+            previous: previous.as_ref().map(|(lens, mix)| (lens.gpu_params(cell_scale), *mix)),
+        });
+        if accelerated { return; }
+        let cpu_started = crate::acceleration::start_projection();
         self.view.paint(|x, y| {
             let px = x as f32 + 0.5 - center.0 + shift_x[y];
             let py = y as f32 + 0.5 - center.1 + shift_y[x];
@@ -752,6 +768,7 @@ impl Mode for Kaleidoscope {
             (e, if e > 1e-6 { eu / e } else { 0.0 })
         });
         self.view.resolve(c, pal);
+        crate::acceleration::finish_projection(cpu_started);
     }
 }
 
@@ -838,11 +855,17 @@ impl Mode for Mandala {
         let (mid, window, turn) = (MID * scene.scale, WINDOW * scene.scale, scene.turn);
 
         let folds = self.folds();
-        self.aim(w, h, folds);
         self.view.fit(w, h);
         // Cell pixels per image pixel. At the normal size the corners see the rim of the glass;
         // the wheel makes the glass larger or smaller, but the center never moves.
         let k = window / (reach * self.controls.scale);
+        let accelerated = crate::acceleration::run(crate::acceleration::Operation::Mandala {
+            src: self.cell.pixels(), side, dst: &mut c.px, palette: pal, w, h,
+            mid, window, scale: k, turn, folds,
+        });
+        if accelerated { return; }
+        let cpu_started = crate::acceleration::start_projection();
+        self.aim(w, h, folds);
         let (sn, cs) = turn.sin_cos();
         let (cell, rays) = (&self.cell, &self.rays);
         self.view.paint(|x, y| {
@@ -857,6 +880,7 @@ impl Mode for Mandala {
             (e, if e > 1e-6 { eu / e } else { 0.0 })
         });
         self.view.resolve(c, pal);
+        crate::acceleration::finish_projection(cpu_started);
     }
 }
 

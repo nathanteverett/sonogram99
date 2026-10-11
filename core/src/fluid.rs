@@ -90,30 +90,37 @@ impl Mode for Orbs {
             (x, y, radius * radius, 0.75 + 0.3 * (t * 0.4 + phase).sin())
         }).collect();
         let hue = 0.5 + 0.16 * (t * 0.3).sin();
-        self.body.paint(|x, y| {
-            if energy < 1e-5 { return (0.0, 0.0); }
-            let mut u = xs[x].0 + ys[y].1;
-            let mut v = ys[y].0 + xs[x].1;
-            let dx = u - hand_x;
-            let dy = v - hand_y;
-            let stir = force * 0.12 / (1.0 + (dx * dx + dy * dy) * 18.0);
-            u += dy * stir;
-            v -= dx * stir;
-            let mut density = 0.0;
-            for &(cx, cy, r2, stretch) in &lobes {
-                let dx = (u - cx) * stretch;
-                let dy = (v - cy) / stretch;
-                density += r2 / (dx * dx + dy * dy + r2 * 0.16);
-            }
-            // Soft luminous contour, translucent interior, and smaller nested folds.
-            let edge = 1.0 / (1.0 + (density - 1.0).powi(2) * 220.0);
-            let inner = ((density - 1.0) * 2.0).clamp(0.0, 1.0);
-            let fold = 1.0 / (1.0 + (density - 1.75).powi(2) * 80.0);
-            let core = 1.0 / (1.0 + (density - 2.65).powi(2) * 45.0);
-            let e = (edge * 2.8 + inner * 0.16 + p.detail * (fold * 0.8 + core * 0.4)) * energy;
-            let color = hue + u * 0.8 - v * 0.55 + (density.min(3.0) - 1.0) * 0.12;
-            (e, color)
+        let accelerated = crate::acceleration::run(crate::acceleration::Operation::Orbs {
+            dst: self.body.pixels_mut(), w, h, xs: &xs, ys: &ys, lobes: &lobes,
+            hand: [hand_x, hand_y, force], hue, energy, detail: p.detail,
         });
+        if !accelerated {
+            self.body.paint(|x, y| {
+                if energy < 1e-5 { return (0.0, 0.0); }
+                let mut u = xs[x].0 + ys[y].1;
+                let mut v = ys[y].0 + xs[x].1;
+                let dx = u - hand_x;
+                let dy = v - hand_y;
+                let stir = force * 0.12 / (1.0 + (dx * dx + dy * dy) * 18.0);
+                u += dy * stir;
+                v -= dx * stir;
+                let mut density = 0.0;
+                for &(cx, cy, r2, stretch) in &lobes {
+                    let dx = (u - cx) * stretch;
+                    let dy = (v - cy) / stretch;
+                    density += r2 / (dx * dx + dy * dy + r2 * 0.16);
+                }
+                // Soft luminous contour, translucent interior, and smaller nested folds.
+                let edge = 1.0 / (1.0 + (density - 1.0).powi(2) * 220.0);
+                let inner = ((density - 1.0) * 2.0).clamp(0.0, 1.0);
+                let fold = 1.0 / (1.0 + (density - 1.75).powi(2) * 80.0);
+                let core = 1.0 / (1.0 + (density - 2.65).powi(2) * 45.0);
+                let e = (edge * 2.8 + inner * 0.16 + p.detail * (fold * 0.8 + core * 0.4)) * energy;
+                let color = hue + u * 0.8 - v * 0.55 + (density.min(3.0) - 1.0) * 0.12;
+                (e, color)
+            });
+            crate::acceleration::finish_software();
+        }
         self.trails.add_scaled(&self.body, dt * 2.4);
         self.trails.resolve_at(c, pal, p.background);
         self.body.composite(c, pal, p.body);
